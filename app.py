@@ -6,7 +6,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from io import BytesIO
 
-# --- ЛОГІКА ОБРОБКИ (ТА Ж САМА, ЩО МИ ВІДЛАГОДИЛИ) ---
+# --- ФУНКЦІЇ ФОРМАТУВАННЯ (БЕЗ ЗМІН) ---
 
 def apply_base_style(paragraph, first_line=1.25, space_before=0):
     paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -64,19 +64,17 @@ def process_abstract_block(new_doc, raw_text, terms, forbidden_word, lang_label,
 # --- ІНТЕРФЕЙС STREAMLIT ---
 
 st.set_page_config(page_title="Науковий Редактор", page_icon="📝")
-
 st.title("📝 Автоматичне форматування статті")
-st.write("Цей інструмент виправляє структуру, авторів, анотації та літературу згідно зі стандартами.")
 
-# Вибір типу статті
+# Вибір типу статті (Додано третій варіант)
 article_type = st.radio(
     "Оберіть тип вашої статті:",
-    ("Оригінальне дослідження", "Клінічний випадок")
+    ("Оригінальне дослідження", "Клінічний випадок", "Огляд літератури")
 )
 
 is_clinical = (article_type == "Клінічний випадок")
+is_review = (article_type == "Огляд літератури")
 
-# Завантаження файлу
 uploaded_file = st.file_uploader("Завантажте файл .docx", type="docx")
 
 if uploaded_file is not None:
@@ -96,8 +94,17 @@ if uploaded_file is not None:
             ua_kw_idx = next((i for i, p in enumerate(paras) if "Ключові слова" in p.text), -1)
             en_kw_idx = next((i for i, p in enumerate(paras) if "Key words" in p.text or "Keywords" in p.text), -1)
 
-            # 2. АНОТАЦІЇ
-            ua_terms = ["Мета", "Матеріали і методи", "Результати", "Висновки"]
+            # 2. АНОТАЦІЇ (Логіка залежить від типу)
+            if is_review:
+                ua_terms = ["Мета", "Висновки"]
+                en_terms = ["Aim", "Conclusions"]
+            elif is_clinical:
+                ua_terms = ["Мета", "Матеріали і методи", "Результати", "Висновки"]
+                en_terms = ["Aim", "Material and methods", "Results", "Conclusions"]
+            else: # Оригінальне дослідження
+                ua_terms = ["Мета", "Матеріали і методи", "Результати", "Висновки"]
+                en_terms = ["Aim", "Material and methods", "Results", "Conclusions"]
+
             process_abstract_block(new_doc, " ".join([paras[i].text for i in range(4, ua_kw_idx)]), 
                                    ua_terms, "Анотація|Реферат", "Українська", report, skip_warnings=is_clinical)
             
@@ -107,18 +114,26 @@ if uploaded_file is not None:
             p_t_en = new_doc.add_paragraph(); add_run(p_t_en, paras[ua_kw_idx + 1].text.upper()); apply_base_style(p_t_en)
             p_a_en = new_doc.add_paragraph(); add_run(p_a_en, fix_authors_metadata(paras[ua_kw_idx + 2].text), bold=True, italic=True); apply_base_style(p_a_en)
 
-            en_terms = ["Aim", "Material and methods", "Results", "Conclusions"]
             process_abstract_block(new_doc, " ".join([paras[i].text for i in range(ua_kw_idx + 3, en_kw_idx)]), 
                                    en_terms, "Abstract", "Англійська", report, skip_warnings=is_clinical)
             
             p_kw_en = new_doc.add_paragraph(); add_run(p_kw_en, "Key words:", bold=True, italic=True)
             add_run(p_kw_en, " " + paras[en_kw_idx].text.replace("Key words", "").replace("Keywords", "").replace(":", "").strip()); apply_base_style(p_kw_en)
 
-            # 3. ОСНОВНИЙ ТЕКСТ
-            if is_clinical:
+            # 3. ОСНОВНИЙ ТЕКСТ (Налаштування розділів)
+            if is_review:
+                sections_map = [
+                    (r"^Вступ", "Вступ"), 
+                    (r"^Мета", "Мета роботи"), 
+                    (r"^Основна\s+частина", "Основна частина"), 
+                    (r"^Висновок|^Висновки", "Висновки"),
+                    (r"^Список\s*літератури|^Література|^Список\s*використаних\s*джерел", "Список літератури")
+                ]
+                all_req = ["Вступ", "Мета роботи", "Основна частина", "Висновки", "Список літератури"]
+            elif is_clinical:
                 sections_map = [(r"^Вступ", "Вступ"), (r"^Опис\s+клінічного\s+випадку", "Опис клінічного випадку"), (r"^Висновок|^Висновки", "Висновок"), (r"^Список\s*літератури|^Література|^Список\s*використаних\s*джерел", "Список літератури")]
                 all_req = ["Вступ", "Опис клінічного випадку", "Висновок", "Список літератури"]
-            else:
+            else: # Оригінальне дослідження
                 sections_map = [(r"^Вступ", "Вступ"), (r"^Мета", "Мета роботи"), (r"^Матеріали\s*(і|та)\s*методи", "Матеріали та методи дослідження"), (r"^Результати\s*та\s*їх\s*обговорення", "Результати та їх обговорення"), (r"^Висновки", "Висновки"), (r"^Перспективи\s*подальших\s*досліджень", "Перспективи подальших досліджень"), (r"^Список\s*літератури|^Література|^Список\s*використаних\s*джерел", "Список літератури")]
                 all_req = ["Вступ", "Мета роботи", "Матеріали та методи дослідження", "Результати та їх обговорення", "Висновки", "Перспективи подальших досліджень", "Список літератури"]
             
@@ -148,24 +163,15 @@ if uploaded_file is not None:
             for r in all_req:
                 if r not in found_sections: report.append(f"❌ НЕ ЗНАЙДЕНО РОЗДІЛ: {r}")
 
-            # --- ПІДГОТОВКА ФАЙЛУ ДО ЗАВАНТАЖЕННЯ ---
             bio = BytesIO()
             new_doc.save(bio)
             
             st.subheader("Звіт про перевірку:")
-            if not report:
-                st.success("✅ Все виглядає чудово!")
+            if not report: st.success("✅ Все виглядає чудово!")
             else:
                 for issue in report:
                     if "❌" in issue: st.error(issue)
                     else: st.warning(issue)
 
-            st.download_button(
-                label="📥 Завантажити виправлену статтю",
-                data=bio.getvalue(),
-                file_name=f"fixed_{uploaded_file.name}",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-
-        except Exception as e:
-            st.error(f"Сталася помилка при обробці: {e}")
+            st.download_button(label="📥 Завантажити виправлену статтю", data=bio.getvalue(), file_name=f"fixed_{uploaded_file.name}", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        except Exception as e: st.error(f"Сталася помилка при обробці: {e}")
