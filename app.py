@@ -6,7 +6,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from io import BytesIO
 
-# --- ФУНКЦІЇ ФОРМАТУВАННЯ (БЕЗ ЗМІН) ---
+# --- ФУНКЦІЇ (БЕЗ ЖОДНИХ ЗМІН) ---
 
 def apply_base_style(paragraph, first_line=1.25, space_before=0):
     paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -42,7 +42,7 @@ def format_vancouver(text):
 def process_abstract_block(new_doc, raw_text, terms, forbidden_word, lang_label, report, skip_warnings=False):
     clean_text = re.sub(rf'^{forbidden_word}[:\s.-]*', '', raw_text, flags=re.IGNORECASE).strip()
     if lang_label == "Українська" and len(clean_text) > 1600:
-        report.append(f"⚠️ {lang_label} анотація занадто велика ({len(clean_text)} зн. при ліміті 1600).")
+        report.append(f"⚠️ УВАГА: {lang_label} анотація занадто велика ({len(clean_text)} зн.).")
     
     if not skip_warnings:
         for t in terms:
@@ -61,12 +61,11 @@ def process_abstract_block(new_doc, raw_text, terms, forbidden_word, lang_label,
             add_run(p, " " + pt.strip())
             apply_base_style(p); curr_term = None
 
-# --- ІНТЕРФЕЙС STREAMLIT ---
+# --- ІНТЕРФЕЙС ---
 
 st.set_page_config(page_title="Науковий Редактор", page_icon="📝")
 st.title("📝 Автоматичне форматування статті")
 
-# Вибір типу статті (Додано третій варіант)
 article_type = st.radio(
     "Оберіть тип вашої статті:",
     ("Оригінальне дослідження", "Клінічний випадок", "Огляд літератури")
@@ -94,17 +93,17 @@ if uploaded_file is not None:
             ua_kw_idx = next((i for i, p in enumerate(paras) if "Ключові слова" in p.text), -1)
             en_kw_idx = next((i for i, p in enumerate(paras) if "Key words" in p.text or "Keywords" in p.text), -1)
 
-            # 2. АНОТАЦІЇ (Логіка залежить від типу)
+            # 2. АНОТАЦІЇ (ЛОГІКА ЗА ТИПОМ)
             if is_review:
+                # Для огляду - свої терміни
                 ua_terms = ["Мета", "Висновки"]
                 en_terms = ["Aim", "Conclusions"]
-            elif is_clinical:
-                ua_terms = ["Мета", "Матеріали і методи", "Результати", "Висновки"]
-                en_terms = ["Aim", "Material and methods", "Results", "Conclusions"]
-            else: # Оригінальне дослідження
+            else:
+                # Для оригінального та клінічного (за замовчуванням) - стандартні терміни
                 ua_terms = ["Мета", "Матеріали і методи", "Результати", "Висновки"]
                 en_terms = ["Aim", "Material and methods", "Results", "Conclusions"]
 
+            # Викликаємо обробку (skip_warnings=True тільки для клінічного випадку, як ти просила раніше)
             process_abstract_block(new_doc, " ".join([paras[i].text for i in range(4, ua_kw_idx)]), 
                                    ua_terms, "Анотація|Реферат", "Українська", report, skip_warnings=is_clinical)
             
@@ -120,7 +119,7 @@ if uploaded_file is not None:
             p_kw_en = new_doc.add_paragraph(); add_run(p_kw_en, "Key words:", bold=True, italic=True)
             add_run(p_kw_en, " " + paras[en_kw_idx].text.replace("Key words", "").replace("Keywords", "").replace(":", "").strip()); apply_base_style(p_kw_en)
 
-            # 3. ОСНОВНИЙ ТЕКСТ (Налаштування розділів)
+            # 3. РОЗДІЛИ (ЛОГІКА ЗА ТИПОМ)
             if is_review:
                 sections_map = [
                     (r"^Вступ", "Вступ"), 
@@ -131,10 +130,21 @@ if uploaded_file is not None:
                 ]
                 all_req = ["Вступ", "Мета роботи", "Основна частина", "Висновки", "Список літератури"]
             elif is_clinical:
-                sections_map = [(r"^Вступ", "Вступ"), (r"^Опис\s+клінічного\s+випадку", "Опис клінічного випадку"), (r"^Висновок|^Висновки", "Висновок"), (r"^Список\s*літератури|^Література|^Список\s*використаних\s*джерел", "Список літератури")]
+                sections_map = [
+                    (r"^Вступ", "Вступ"), 
+                    (r"^Опис\s+клінічного\s+випадку", "Опис клінічного випадку"), 
+                    (r"^Висновок|^Висновки", "Висновок"), 
+                    (r"^Список\s*літератури|^Література|^Список\s*використаних\s*джерел", "Список літератури")
+                ]
                 all_req = ["Вступ", "Опис клінічного випадку", "Висновок", "Список літератури"]
-            else: # Оригінальне дослідження
-                sections_map = [(r"^Вступ", "Вступ"), (r"^Мета", "Мета роботи"), (r"^Матеріали\s*(і|та)\s*методи", "Матеріали та методи дослідження"), (r"^Результати\s*та\s*їх\s*обговорення", "Результати та їх обговорення"), (r"^Висновки", "Висновки"), (r"^Перспективи\s*подальших\s*досліджень", "Перспективи подальших досліджень"), (r"^Список\s*літератури|^Література|^Список\s*використаних\s*джерел", "Список літератури")]
+            else: # Оригінальне дослідження (ПОВНЕ ПОВЕРНЕННЯ КОДУ)
+                sections_map = [
+                    (r"^Вступ", "Вступ"), (r"^Мета", "Мета роботи"), 
+                    (r"^Матеріали\s*(і|та)\s*методи", "Матеріали та методи дослідження"),
+                    (r"^Результати\s*та\s*їх\s*обговорення", "Результати та їх обговорення"),
+                    (r"^Висновки", "Висновки"), (r"^Перспективи\s*подальших\s*досліджень", "Перспективи подальших досліджень"),
+                    (r"^Список\s*літератури|^Література|^Список\s*використаних\s*джерел", "Список літератури")
+                ]
                 all_req = ["Вступ", "Мета роботи", "Матеріали та методи дослідження", "Результати та їх обговорення", "Висновки", "Перспективи подальших досліджень", "Список літератури"]
             
             in_literature = False
@@ -144,34 +154,44 @@ if uploaded_file is not None:
             for i in range(en_kw_idx + 1, len(paras)):
                 text = paras[i].text.strip()
                 if re.match(r"^References[:.\s]*$", text, re.IGNORECASE):
-                    p_ref = new_doc.add_paragraph(); add_run(p_ref, "References", bold=True); apply_base_style(p_ref); in_references = True; in_literature = False; continue
+                    p_ref = new_doc.add_paragraph(); add_run(p_ref, "References", bold=True); apply_base_style(p_ref)
+                    in_references = True; in_literature = False; continue
+
                 matched_std = None
                 for pattern, std_name in sections_map:
                     if re.match(pattern, text, re.IGNORECASE):
-                        matched_std = std_name; text = re.sub(pattern + r"[:.\s-]*", "", text, count=1, flags=re.IGNORECASE).strip(); break
+                        matched_std = std_name
+                        text = re.sub(pattern + r"[:.\s-]*", "", text, count=1, flags=re.IGNORECASE).strip()
+                        break
                 
                 if matched_std:
-                    p_h = new_doc.add_paragraph(); add_run(p_h, matched_std, bold=True); apply_base_style(p_h, space_before=10); found_sections.add(matched_std); in_literature = (matched_std == "Список літератури")
-                    if text: p_c = new_doc.add_paragraph(); add_run(p_c, format_vancouver(text) if in_literature else text); apply_base_style(p_c)
+                    p_h = new_doc.add_paragraph(); add_run(p_h, matched_std, bold=True)
+                    apply_base_style(p_h, space_before=10)
+                    found_sections.add(matched_std)
+                    in_literature = (matched_std == "Список літератури")
+                    if text:
+                        p_c = new_doc.add_paragraph(); add_run(p_c, format_vancouver(text) if in_literature else text); apply_base_style(p_c)
                 else:
                     p_txt = new_doc.add_paragraph()
                     if in_literature or in_references:
-                        vanc_text = format_vancouver(text); add_run(p_txt, vanc_text)
-                    else: add_run(p_txt, text)
+                        add_run(p_txt, format_vancouver(text))
+                    else:
+                        add_run(p_txt, text)
                     apply_base_style(p_txt)
 
             for r in all_req:
                 if r not in found_sections: report.append(f"❌ НЕ ЗНАЙДЕНО РОЗДІЛ: {r}")
 
+            # ЗВЕРШЕННЯ
             bio = BytesIO()
             new_doc.save(bio)
-            
             st.subheader("Звіт про перевірку:")
             if not report: st.success("✅ Все виглядає чудово!")
             else:
                 for issue in report:
                     if "❌" in issue: st.error(issue)
                     else: st.warning(issue)
-
             st.download_button(label="📥 Завантажити виправлену статтю", data=bio.getvalue(), file_name=f"fixed_{uploaded_file.name}", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-        except Exception as e: st.error(f"Сталася помилка при обробці: {e}")
+
+        except Exception as e:
+            st.error(f"Помилка: {e}")
