@@ -1,171 +1,195 @@
+# app.py
 import streamlit as st
-import re
 from docx import Document
 from docx.shared import Pt, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml.ns import qn
 from io import BytesIO
+import re
+from datetime import datetime
 
-# --- ЛОГІКА ОБРОБКИ (ТА Ж САМА, ЩО МИ ВІДЛАГОДИЛИ) ---
+st.set_page_config(page_title="Перевірка статті", layout="wide")
+st.title("Перевірка наукової статті")
 
-def apply_base_style(paragraph, first_line=1.25, space_before=0):
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    paragraph.paragraph_format.line_spacing = 1.15
-    paragraph.paragraph_format.first_line_indent = Cm(first_line)
-    paragraph.paragraph_format.space_before = Pt(space_before)
+# ========================
+# 1️⃣ Вибір мови та типу статті
+# ========================
+language = st.radio("Мова статті:", ('Українська', 'English'))
+article_type = st.radio("Тип статті:", ('Оригінальне дослідження', 'Клінічний випадок', 'Огляд літератури'))
 
-def add_run(paragraph, text, bold=False, italic=False):
-    run = paragraph.add_run(text)
-    run.font.name = 'Times New Roman'
-    run.font.size = Pt(12)
-    run.bold, run.italic = bold, italic
-    run._element.rPr.rFonts.set(qn('w:eastAsia'), 'Times New Roman')
-    return run
+uploaded_file = st.file_uploader("Завантажте DOCX файл статті", type=["docx"])
 
-def fix_authors_metadata(text):
-    parts = re.split(r'[,;]', text)
-    fixed = []
-    for p in parts:
-        p = p.strip()
-        res = re.sub(r'([А-ЯЁІЇЄҐA-Z][а-яёіїєґa-z]+)\s+([А-ЯЁІЇЄҐA-Z]\.\s?[А-ЯЁІЇЄҐA-Z]\.)', r'\2 \1', p)
-        fixed.append(res)
-    return ", ".join(fixed)
-
-def format_vancouver(text):
-    text = text.replace('"', '').replace('«', '').replace('»', '')
-    text = re.sub(r'([A-ZА-Я][a-zа-я]+)\s+([A-ZА-Я])\.\s?([A-ZА-Я])\.', r'\1 \2\3', text)
-    text = re.sub(r'([A-ZА-Я][a-zа-я]+)\s+([A-ZА-Я])\.', r'\1 \2', text)
-    text = re.sub(r'(\d{4})[\.\s,–—]*Vol\.?\s*(\d+)[\.\s,–—]*[Nn]o\.?\s*(\d+)[\.\s,–—]*[Pp]\.?\s*(\d+)[-–—](\d+)', r'\1;\2(\3):\4-\5', text)
-    text = re.sub(r'(\d{4})[\.\s,–—]*Vol\.?\s*(\d+)[\.\s,–—]*[Pp]\.?\s*(\d+)[-–—](\d+)', r'\1;\2:\3-\4', text)
-    return text.strip()
-
-def process_abstract_block(new_doc, raw_text, terms, forbidden_word, lang_label, report, skip_warnings=False):
-    clean_text = re.sub(rf'^{forbidden_word}[:\s.-]*', '', raw_text, flags=re.IGNORECASE).strip()
-    if lang_label == "Українська" and len(clean_text) > 1600:
-        report.append(f"⚠️ {lang_label} анотація занадто велика ({len(clean_text)} зн. при ліміті 1600).")
-    
-    if not skip_warnings:
-        for t in terms:
-            if t not in clean_text: 
-                report.append(f"❌ ВІДСУТНІЙ розділ у {lang_label} анотації: {t}")
-
-    pattern = f"({'|'.join(re.escape(t) for t in terms)})"
-    parts = re.split(pattern, clean_text)
-    curr_term = None
-    for pt in parts:
-        if not pt or not pt.strip(): continue
-        if pt in terms: curr_term = pt
-        else:
-            p = new_doc.add_paragraph()
-            if curr_term: add_run(p, curr_term, bold=True, italic=True)
-            add_run(p, " " + pt.strip())
-            apply_base_style(p); curr_term = None
-
-# --- ІНТЕРФЕЙС STREAMLIT ---
-
-st.set_page_config(page_title="Науковий Редактор", page_icon="📝")
-
-st.title("📝 Автоматичне форматування статті")
-st.write("Цей інструмент виправляє структуру, авторів, анотації та літературу згідно зі стандартами.")
-
-# Вибір типу статті
-article_type = st.radio(
-    "Оберіть тип вашої статті:",
-    ("Оригінальне дослідження", "Клінічний випадок")
-)
-
-is_clinical = (article_type == "Клінічний випадок")
-
-# Завантаження файлу
-uploaded_file = st.file_uploader("Завантажте файл .docx", type="docx")
-
+# ========================
+# 2️⃣ Обробка файлу
+# ========================
 if uploaded_file is not None:
-    if st.button("Обробити статтю"):
-        try:
-            doc = Document(uploaded_file)
-            new_doc = Document()
-            report = []
-            paras = [p for p in doc.paragraphs if p.text.strip()]
-            
-            # 1. ШАПКА
-            p_udc = new_doc.add_paragraph(); add_run(p_udc, paras[0].text); apply_base_style(p_udc)
-            p_t_ua = new_doc.add_paragraph(); add_run(p_t_ua, paras[1].text.upper()); apply_base_style(p_t_ua)
-            p_a_ua = new_doc.add_paragraph(); add_run(p_a_ua, fix_authors_metadata(paras[2].text), bold=True, italic=True); apply_base_style(p_a_ua)
-            p_aff = new_doc.add_paragraph(); add_run(p_aff, paras[3].text); apply_base_style(p_aff)
+    doc = Document(uploaded_file)
+    paragraphs = doc.paragraphs
+    report = []
 
-            ua_kw_idx = next((i for i, p in enumerate(paras) if "Ключові слова" in p.text), -1)
-            en_kw_idx = next((i for i, p in enumerate(paras) if "Key words" in p.text or "Keywords" in p.text), -1)
+    # -------------------
+    # Поля сторінки
+    # -------------------
+    section = doc.sections[0]
+    for attr, value in [('top_margin', 2), ('bottom_margin', 2), ('left_margin', 2), ('right_margin', 2)]:
+        if getattr(section, attr) != Cm(value):
+            setattr(section, attr, Cm(value))
+            report.append(f"Виправлено поле {attr.replace('_',' ')} на {value} см")
 
-            # 2. АНОТАЦІЇ
-            ua_terms = ["Мета", "Матеріали і методи", "Результати", "Висновки"]
-            process_abstract_block(new_doc, " ".join([paras[i].text for i in range(4, ua_kw_idx)]), 
-                                   ua_terms, "Анотація|Реферат", "Українська", report, skip_warnings=is_clinical)
-            
-            p_kw_ua = new_doc.add_paragraph(); add_run(p_kw_ua, "Ключові слова:", bold=True, italic=True)
-            add_run(p_kw_ua, " " + paras[ua_kw_idx].text.replace("Ключові слова", "").replace(":", "").strip()); apply_base_style(p_kw_ua)
+    # -------------------
+    # Формат тексту
+    # -------------------
+    for paragraph in paragraphs:
+        para_format = paragraph.paragraph_format
+        para_format.line_spacing = 1.5
+        para_format.space_before = Pt(0)
+        para_format.space_after = Pt(0)
+        if paragraph.alignment == WD_ALIGN_PARAGRAPH.JUSTIFY:
+            para_format.first_line_indent = Cm(1.25)
+        for run in paragraph.runs:
+            run.font.name = "Times New Roman"
+            run.font.size = Pt(14)
+    report.append("Формат тексту перевірено та виправлено")
 
-            p_t_en = new_doc.add_paragraph(); add_run(p_t_en, paras[ua_kw_idx + 1].text.upper()); apply_base_style(p_t_en)
-            p_a_en = new_doc.add_paragraph(); add_run(p_a_en, fix_authors_metadata(paras[ua_kw_idx + 2].text), bold=True, italic=True); apply_base_style(p_a_en)
+    # -------------------
+    # УДК, назва та автори
+    # -------------------
+    if len(paragraphs) >= 1:
+        first = paragraphs[0]
+        if not first.text.startswith("УДК"):
+            first.text = "УДК 000.00"
+            report.append("Додано УДК")
+        for run in first.runs:
+            run.font.bold = True
+        report.append("УДК перевірено/виправлено")
 
-            en_terms = ["Aim", "Material and methods", "Results", "Conclusions"]
-            process_abstract_block(new_doc, " ".join([paras[i].text for i in range(ua_kw_idx + 3, en_kw_idx)]), 
-                                   en_terms, "Abstract", "Англійська", report, skip_warnings=is_clinical)
-            
-            p_kw_en = new_doc.add_paragraph(); add_run(p_kw_en, "Key words:", bold=True, italic=True)
-            add_run(p_kw_en, " " + paras[en_kw_idx].text.replace("Key words", "").replace("Keywords", "").replace(":", "").strip()); apply_base_style(p_kw_en)
+    if len(paragraphs) >= 2:
+        # Назва статті
+        title_para = paragraphs[1]
+        title_para.text = title_para.text.replace("\n"," ").strip().upper()
+        for run in title_para.runs:
+            run.font.bold = True
+        report.append("Назва статті перевірена та приведена до формату")
 
-            # 3. ОСНОВНИЙ ТЕКСТ
-            if is_clinical:
-                sections_map = [(r"^Вступ", "Вступ"), (r"^Опис\s+клінічного\s+випадку", "Опис клінічного випадку"), (r"^Висновок|^Висновки", "Висновок"), (r"^Список\s*літератури|^Література|^Список\s*використаних\s*джерел", "Список літератури")]
-                all_req = ["Вступ", "Опис клінічного випадку", "Висновок", "Список літератури"]
-            else:
-                sections_map = [(r"^Вступ", "Вступ"), (r"^Мета", "Мета роботи"), (r"^Матеріали\s*(і|та)\s*методи", "Матеріали та методи дослідження"), (r"^Результати\s*та\s*їх\s*обговорення", "Результати та їх обговорення"), (r"^Висновки", "Висновки"), (r"^Перспективи\s*подальших\s*досліджень", "Перспективи подальших досліджень"), (r"^Список\s*літератури|^Література|^Список\s*використаних\s*джерел", "Список літератури")]
-                all_req = ["Вступ", "Мета роботи", "Матеріали та методи дослідження", "Результати та їх обговорення", "Висновки", "Перспективи подальших досліджень", "Список літератури"]
-            
-            in_literature = False
-            in_references = False
-            found_sections = set()
-
-            for i in range(en_kw_idx + 1, len(paras)):
-                text = paras[i].text.strip()
-                if re.match(r"^References[:.\s]*$", text, re.IGNORECASE):
-                    p_ref = new_doc.add_paragraph(); add_run(p_ref, "References", bold=True); apply_base_style(p_ref); in_references = True; in_literature = False; continue
-                matched_std = None
-                for pattern, std_name in sections_map:
-                    if re.match(pattern, text, re.IGNORECASE):
-                        matched_std = std_name; text = re.sub(pattern + r"[:.\s-]*", "", text, count=1, flags=re.IGNORECASE).strip(); break
-                
-                if matched_std:
-                    p_h = new_doc.add_paragraph(); add_run(p_h, matched_std, bold=True); apply_base_style(p_h, space_before=10); found_sections.add(matched_std); in_literature = (matched_std == "Список літератури")
-                    if text: p_c = new_doc.add_paragraph(); add_run(p_c, format_vancouver(text) if in_literature else text); apply_base_style(p_c)
+    if len(paragraphs) >= 3:
+        # Автори
+        authors_para = paragraphs[2]
+        authors_list = authors_para.text.split(',')
+        new_authors = []
+        for author in authors_list:
+            author = author.strip()
+            parts = author.split()
+            if len(parts) >= 2:
+                if parts[0].endswith("."):
+                    initials, surname = parts[0], parts[1]
+                    rest = " ".join(parts[2:])
                 else:
-                    p_txt = new_doc.add_paragraph()
-                    if in_literature or in_references:
-                        vanc_text = format_vancouver(text); add_run(p_txt, vanc_text)
-                    else: add_run(p_txt, text)
-                    apply_base_style(p_txt)
-
-            for r in all_req:
-                if r not in found_sections: report.append(f"❌ НЕ ЗНАЙДЕНО РОЗДІЛ: {r}")
-
-            # --- ПІДГОТОВКА ФАЙЛУ ДО ЗАВАНТАЖЕННЯ ---
-            bio = BytesIO()
-            new_doc.save(bio)
-            
-            st.subheader("Звіт про перевірку:")
-            if not report:
-                st.success("✅ Все виглядає чудово!")
+                    surname, initials = parts[0], parts[1]
+                    rest = " ".join(parts[2:])
+                text = f"{initials} {surname}"
+                if rest:
+                    text += f" {rest}"
+                new_authors.append(text)
             else:
-                for issue in report:
-                    if "❌" in issue: st.error(issue)
-                    else: st.warning(issue)
+                new_authors.append(author)
+        authors_para.text = ", ".join(new_authors)
+        for run in authors_para.runs:
+            run.font.bold = True
+            run.font.italic = True
+        report.append("Автори відформатовані (жирний + курсив)")
 
-            st.download_button(
-                label="📥 Завантажити виправлену статтю",
-                data=bio.getvalue(),
-                file_name=f"fixed_{uploaded_file.name}",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
+    # -------------------
+    # Афіліація та анотація
+    # -------------------
+    max_aff = 0
+    numbers = re.findall(r'\d+', paragraphs[2].text if len(paragraphs)>=3 else "")
+    if numbers:
+        max_aff = max([int(n) for n in numbers])
+    aff_start = 3
+    aff_end = aff_start + max_aff if max_aff>0 else aff_start+1
+    for para in paragraphs[aff_start:aff_end]:
+        for run in para.runs:
+            run.font.bold = False
+            run.font.italic = False
+    report.append(f"Афіліація авторів перевірена ({aff_end - aff_start} рядків)")
 
-        except Exception as e:
-            st.error(f"Сталася помилка при обробці: {e}")
+    # Анотація
+    abstract_start = aff_end
+    abstract_end = abstract_start
+    for i in range(abstract_start, len(paragraphs)):
+        if any(k.lower() in paragraphs[i].text.lower() for k in ["ключові слова","keywords"]):
+            abstract_end = i+1
+            break
+    abstract_paras = paragraphs[abstract_start:abstract_end]
+    for para in abstract_paras:
+        para.paragraph_format.first_line_indent = None
+        for run in para.runs:
+            bold_prev = run.font.bold
+            run.font.italic = True
+            if bold_prev is not None:
+                run.font.bold = bold_prev
+    abstract_len = sum(len(p.text) for p in abstract_paras)
+    if abstract_len < 1800 or abstract_len > 2500:
+        report.append(f"⚠️ Довжина анотації {abstract_len} символів (рекомендовано 1800–2500)")
+    report.append("Анотація перевірена та відформатована (курсив)")
+
+    # ========================
+    # Література (Vancouver + кількість)
+    # ========================
+    refs_start = None
+    search_titles = ["список літератури"] if language=="Українська" else ["references"]
+    for i, para in enumerate(paragraphs):
+        if any(para.text.strip().lower().startswith(title) for title in search_titles):
+            refs_start = i+1
+            refs_title = paragraphs[i].text.strip()
+            break
+    if refs_start is None:
+        report.append("❌ Не знайдено розділ літератури")
+    else:
+        ref_paras = []
+        for para in paragraphs[refs_start:]:
+            text = para.text.strip()
+            if not text:
+                continue
+            if re.match(r"^\d+\.\s", text):
+                ref_paras.append(para)
+            else:
+                break
+        ref_count = len(ref_paras)
+        numbering_errors = any(not re.match(r"^\d+\.\s", p.text.strip()) for p in ref_paras)
+        vancouver_errors = any(not re.search(r"\b(19|20)\d{2}\b", p.text.strip()) or not re.match(r"^\d+\.\s", p.text.strip()) for p in ref_paras)
+        if article_type in ["Оригінальне дослідження","Клінічний випадок"]:
+            if ref_count>15:
+                report.append(f"⚠️ Кількість джерел {ref_count} (не більше 15)")
+            else:
+                report.append(f"Кількість джерел: {ref_count} (норма)")
+        elif article_type=="Огляд літератури":
+            if ref_count<50:
+                report.append(f"⚠️ Кількість джерел {ref_count} (не менше 50)")
+            else:
+                report.append(f"Кількість джерел: {ref_count} (відповідає вимогам)")
+        if numbering_errors:
+            report.append("⚠️ Порушена послідовність нумерації")
+        if vancouver_errors:
+            report.append("⚠️ Список літератури може не відповідати Vancouver style")
+        else:
+            report.append("Стиль літератури відповідає базовим вимогам Vancouver")
+        report.append(f"Перевірено розділ: {refs_title}")
+
+    # ========================
+    # Вивід результатів
+    # ========================
+    st.header("Звіт про перевірку")
+    for r in report:
+        st.write(r)
+
+    # ========================
+    # Завантаження відформатованого файлу
+    # ========================
+    output = BytesIO()
+    doc.save(output)
+    output.seek(0)
+    st.download_button(
+        label="Завантажити відформатований DOCX",
+        data=output,
+        file_name="відформатована_стаття.docx"
+    )
