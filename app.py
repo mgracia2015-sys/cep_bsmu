@@ -412,26 +412,7 @@ if st.button("🚀 Обробити статтю") and uploaded_file is not None
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
-    # 2.8 Google Docs Log (Спроба виконати, якщо є сертифікати)
-    # ПРИМІТКА: У Streamlit Cloud авторизація через auth.authenticate_user() не працюватиме як у Colab.
-    # Потрібен файл service_account.json або налаштовані Secrets.
-    try:
-        # Ця частина залишиться робочою ТІЛЬКИ якщо запущено локально з наявним браузером
-        # або налаштованими змінними оточення Google.
-        # В Streamlit Cloud вона швидше за все видасть помилку без додаткових налаштувань.
-        # auth.authenticate_user()  <-- Видалено, бо це специфічно для Colab
-        creds, _ = google.auth.default()
-        service = build('docs', 'v1', credentials=creds)
-        current_date = datetime.now().strftime("%d.%m.%Y")
-        udk_title = paragraphs[1].text if len(paragraphs) > 0 else "Невідомо"
-        authors = paragraphs[2].text if len(paragraphs) > 2 else "Невідомо"
-        text_to_insert = f"\n[{current_date}] АВТОР: {authors} | СТАТТЯ: {udk_title}\n"
-        requests = [{'insertText': {'location': {'index': 1}, 'text': text_to_insert}}]
-        SHARED_LOG_DOC_ID = '13j6RQGukjUHqTu4doCFeqVtS7PlbrfBIKXVG8Kg7qzo'
-        service.documents().batchUpdate(documentId=SHARED_LOG_DOC_ID, body={'requests': requests}).execute()
-        st.info("✅ Дані успішно додані у Google Docs")
-    except Exception as e:
-        st.warning(f"⚠️ Запис в журнал Google Docs пропущено (потрібне налаштування доступу): {e}")
+
 
 elif uploaded_file is None:
     st.info("Будь ласка, завантажте файл, щоб почати.")
