@@ -256,32 +256,32 @@ if st.button("🚀 Обробити статтю") and uploaded_file is not None
             "original": {
                 "abstract_uk": ["Мета дослідження", "Матеріали і методи", "Результати", "Висновки", "Ключові слова"],
                 "abstract_en": ["Objective", "Materials and methods", "Results", "Conclusions", "Key words"],
-                "main_text": ["Вступ", "Мета роботи", "Матеріал і методи дослідження", "Результати та їх обговорення", "Висновки", "Перспективи подальших досліджень", "Список літератури", "References"]
+                "main_text": ["Вступ", "Мета роботи", "Матеріал і методи дослідження", "Результати та їх обговорення", "Висновки", "Перспективи подальших досліджень", "Список літератури", "References", "Відомості про авторів"]
             },
             "case": {
                 "abstract_uk": ["Висновки"], "abstract_en": ["Conclusions"],
-                "main_text": ["Вступ", "Опис клінічного випадку", "Висновки", "Список літератури", "References"]
+                "main_text": ["Вступ", "Опис клінічного випадку", "Висновки", "Список літератури", "References", "Відомості про авторів"]
             },
             "review": {
                 "abstract_uk": ["Мета роботи", "Основна частина", "Висновки"],
                 "abstract_en": ["Objective", "Main Text", "Conclusions"],
-                "main_text": ["Вступ", "Мета роботи", "Основна частина", "Висновки", "Список літератури", "References"]
+                "main_text": ["Вступ", "Мета роботи", "Основна частина", "Висновки", "Список літератури", "References", "Відомості про авторів"]
             }
         },
         "en": {
             "original": {
                 "abstract_en": ["Objective", "Materials and methods", "Results", "Conclusions", "Key words"],
                 "abstract_uk": ["Мета дослідження", "Матеріали і методи", "Результати", "Висновки", "Ключові слова"],
-                "main_text": ["Introduction", "Objective", "Materials and Methods", "Results and Discussion", "Conclusions", "Prospects for further research", "References"]
+                "main_text": ["Introduction", "Objective", "Materials and Methods", "Results and Discussion", "Conclusions", "Prospects for further research", "References", "Information about authors"]
             },
             "case": {
                 "abstract_en": ["Conclusions"], "abstract_uk": ["Висновки"],
-                "main_text": ["Introduction", "Case description", "Conclusions", "References"]
+                "main_text": ["Introduction", "Case description", "Conclusions", "References", "Information about authors"]
             },
             "review": {
                 "abstract_en": ["Objective", "Materials and methods", "Results", "Conclusions", "Key words"],
                 "abstract_uk": ["Мета дослідження", "Матеріали і методи", "Результати", "Висновки", "Ключові слова"],
-                "main_text": ["Introduction", "Objective", "Main part", "Conclusions", "References"]
+                "main_text": ["Introduction", "Objective", "Main part", "Conclusions", "References", "Information about authors"]
             }
         }
     }
@@ -302,13 +302,25 @@ if st.button("🚀 Обробити статтю") and uploaded_file is not None
         for item in missing_elements: report.append(f"   - {item}")
     else: report.append("✅ Усі обов’язкові структурні елементи присутні та оформлені правильно")
 
-    # ПЕРЕВІРКА ЛІТЕРАТУРИ
+    # ============================================================
+    # ПЕРЕВІРКА ЛІТЕРАТУРИ (ОНОВЛЕНА ВЕРСІЯ)
+    # ============================================================
     references_start, references_title = None, None
-    titles_to_find = ["список літератури", "references"]
+    stop_titles = []
+
+    # 1️⃣ Шукаємо початок та визначаємо умови завершення
     for i, para in enumerate(paragraphs):
         text_lower = para.text.strip().lower()
-        if any(text_lower.startswith(t) for t in titles_to_find):
-            references_start, references_title = i + 1, para.text.strip()
+        
+        if text_lower.startswith("список літератури"):
+            references_start = i + 1
+            references_title = para.text.strip()
+            stop_titles = ["references"]  # Якщо почали з укр, зупиняємось на англ
+            break
+        elif text_lower.startswith("references"):
+            references_start = i + 1
+            references_title = para.text.strip()
+            stop_titles = ["відомості про авторів", "information about authors"]  # Якщо почали з англ
             break
 
     if references_start is None:
@@ -317,29 +329,57 @@ if st.button("🚀 Обробити статтю") and uploaded_file is not None
         reference_paragraphs = []
         for para in paragraphs[references_start:]:
             text = para.text.strip()
-            if not text: continue
-            if re.search(r"(author|email|e-mail|correspondence|адреса|контакт)", text.lower()): break
+            if not text: 
+                continue
+            
+            text_lower = text.lower()
+            
+            # 🛑 Перевірка на "стоп-заголовки" за вашою умовою
+            if any(text_lower.startswith(st) for st in stop_titles):
+                break
+                
+            # 🛑 Додаткова перевірка на контактну інформацію (залишаємо для надійності)
+            if re.search(r"(author|email|e-mail|correspondence|адреса|контакт)", text_lower):
+                break
+
             reference_paragraphs.append(text)
         
         reference_count = len(reference_paragraphs)
+        
+        # --- Перевірка кількості ---
         if article_type in ["original", "case"]:
-            if reference_count > 15: report.append(f"⚠️ Джерел: {reference_count} (допустимо не більше 15)")
-            else: report.append(f"Кількість джерел: {reference_count}")
+            if reference_count > 15: 
+                report.append(f"⚠️ Джерел: {reference_count} (допустимо не більше 15)")
+            else: 
+                report.append(f"Кількість джерел: {reference_count}")
         elif article_type == "review":
-            if reference_count < 50: report.append(f"⚠️ Джерел: {reference_count} (для огляду потрібно не менше 50)")
-            else: report.append(f"Кількість джерел: {reference_count}")
+            if reference_count < 50: 
+                report.append(f"⚠️ Джерел: {reference_count} (для огляду потрібно не менше 50)")
+            else: 
+                report.append(f"Кількість джерел: {reference_count}")
 
+        # --- Базова перевірка Vancouver ---
         expected_number, numbering_errors, vancouver_errors = 1, False, False
         for ref in reference_paragraphs:
+            # Перевірка нумерації
             match = re.match(r"^(\d+)[\.\)]", ref)
             if match:
-                if int(match.group(1)) != expected_number: numbering_errors = True
+                if int(match.group(1)) != expected_number: 
+                    numbering_errors = True
                 expected_number += 1
-            else: numbering_errors = True
-            if not re.search(r"\b(19|20)\d{2}\b", ref): vancouver_errors = True
+            else: 
+                numbering_errors = True
+            
+            # Перевірка року (має бути 4 цифри)
+            if not re.search(r"\b(19|20)\d{2}\b", ref): 
+                vancouver_errors = True
         
-        if vancouver_errors: report.append("⚠️ Можливе порушення Vancouver style")
-        else: report.append("Стиль літератури виглядає коректним (базова перевірка)")
+        if vancouver_errors: 
+            report.append("⚠️ Можливе порушення Vancouver style (не знайдено рік або порушено формат)")
+        else: 
+            report.append("Стиль літератури виглядає коректним (базова перевірка)")
+            
+        report.append(f"Перевірено розділ: {references_title}")
 
     # 2.6 Збереження файлу в пам'ять для завантаження
     bio = io.BytesIO()
